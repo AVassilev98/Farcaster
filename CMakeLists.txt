@@ -78,4 +78,38 @@ add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}Shaders)
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     SHADER_DIR="${SHADER_OUTPUT_DIR}"
+    ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
 )
+
+# ---- Asset downloads --------------------------------------------------------
+set(ASSET_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets)
+set(SPONZA_DIR ${ASSET_DIR}/sponza)
+set(SPONZA_STAMP ${SPONZA_DIR}/.downloaded)
+set(CURTAINS_STAMP ${SPONZA_DIR}/.curtains_downloaded)
+
+add_custom_command(
+    OUTPUT  ${SPONZA_STAMP}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SPONZA_DIR}
+    COMMAND curl -L -o ${SPONZA_DIR}/sponza_base.zip
+            "https://cdrdv2.intel.com/v1/dl/getContent/830833"
+    COMMAND ${CMAKE_COMMAND} -E chdir ${SPONZA_DIR}
+            ${CMAKE_COMMAND} -E tar xf ${SPONZA_DIR}/sponza_base.zip --format=zip
+    COMMAND ${CMAKE_COMMAND} -E rm ${SPONZA_DIR}/sponza_base.zip
+    COMMAND ${CMAKE_COMMAND} -E touch ${SPONZA_STAMP}
+    COMMENT "Downloading Intel Sponza base scene"
+)
+
+add_custom_command(
+    OUTPUT  ${CURTAINS_STAMP}
+    DEPENDS ${SPONZA_STAMP}
+    COMMAND curl -L -o ${SPONZA_DIR}/curtains.zip
+            "https://cdrdv2.intel.com/v1/dl/getContent/726650"
+    COMMAND ${CMAKE_COMMAND} -E chdir ${SPONZA_DIR}
+            ${CMAKE_COMMAND} -E tar xf ${SPONZA_DIR}/curtains.zip --format=zip
+    COMMAND ${CMAKE_COMMAND} -E rm ${SPONZA_DIR}/curtains.zip
+    COMMAND ${CMAKE_COMMAND} -E touch ${CURTAINS_STAMP}
+    COMMENT "Downloading Intel Sponza colorful curtains add-on"
+)
+
+add_custom_target(${PROJECT_NAME}Assets DEPENDS ${SPONZA_STAMP} ${CURTAINS_STAMP})
+add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}Assets)
