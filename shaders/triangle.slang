@@ -1,3 +1,13 @@
+struct MVP
+{
+    float4x4 model;
+    float4x4 view;
+    float4x4 projection;
+};
+
+[[vk::binding(0, 0)]]
+ConstantBuffer<MVP> mvp;
+
 struct VertexInput
 {
     float2 position : POSITION;
@@ -14,7 +24,8 @@ struct VertexOutput
 VertexOutput vertMain(VertexInput vin)
 {
     VertexOutput output;
-    output.sv_position = float4(vin.position, 0.0, 1.0);
+    float4 pos = float4(vin.position, 0.0, 1.0);
+    output.sv_position = mul(mvp.projection, mul(mvp.view, mul(mvp.model, pos)));
     output.color       = vin.color;
     return output;
 }

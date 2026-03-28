@@ -5,13 +5,118 @@
 #include "photon/photon_mesh.h"
 #include "photon/photon_pipeline.h"
 #include "photon/photon_status.h"
+#include "photon/photon_ubo.h"
+#include "photon/photon_window.h"
+#include "string.h"
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include "photon/photon.h"
 
 #include "stdio.h"
+typedef struct MVP {
+    mat4 model;
+    mat4 view;
+    mat4 projection;
+} MVP;
+typedef struct MVPDescriptorCreateParams {
+    PhPipeline *pipeline;
+    PhUBOPerFrame *uboPerFrame;
+} MVPDescriptorCreateParams;
 
-PhStatus renderTriangle(PhDeviceHandle device, PhPipeline *pipeline, PhMesh *mesh, PhImage *image, PhSemaphore *pWait, PhSemaphore *pSignal)
+typedef struct MVPData {
+    MVP mvp;
+    PhUBOPerFrame perFrameMVPUBO;
+    PhPerFrameResourceHandle descriptorSetHandle;
+} MVPData;
+
+static PhStatus _mvp_descriptor_create(PhDeviceHandle hDevice, void *userdata, uint32_t frameIndex, void *out)
+{
+    MVPDescriptorCreateParams *params = (MVPDescriptorCreateParams *)userdata;
+    PhDescriptorSet *pSet = (PhDescriptorSet *)out;
+
+    PhUBO *pUBO;
+    PH_CHECK(PH_LOG_ERROR, ph_device_per_frame_get_at(hDevice, params->uboPerFrame->uboDataHandle, frameIndex, (void **)&pUBO));
+
+    PH_CHECK(PH_LOG_ERROR, ph_device_descriptor_sets_allocate(hDevice, params->pipeline->pSetLayouts, 1, pSet));
+
+    VkDescriptorBufferInfo bufInfo = {
+        .buffer = pUBO->ubo.buffer,
+        .offset = 0,
+        .range  = sizeof(MVP),
+    };
+    PhDescriptorWrite write = {
+        .set          = *pSet,
+        .binding      = 0,
+        .arrayElement = 0,
+        .type         = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .count        = 1,
+        .pBufferInfo  = &bufInfo,
+    };
+    PH_CHECK(PH_LOG_ERROR, ph_device_descriptor_sets_write(hDevice, &write, 1));
+
+    return PH_SUCCESS;
+}
+
+static void _mvp_descriptor_destroy(PhDeviceHandle hDevice, void *resource)
+{
+    PhDescriptorSet *pSet = (PhDescriptorSet *)resource;
+    ph_device_descriptor_sets_free(hDevice, pSet, 1);
+}
+
+static PhStatus initMVP(PhDeviceHandle hDevice, PhPipeline *pipeline, MVPData *pOut)
+{
+    PhExtent2D screenDimensions;
+    PH_CHECK(PH_LOG_ERROR, ph_device_extent_get(hDevice, &screenDimensions));
+
+    glm_mat4_identity(pOut->mvp.model);
+    glm_rotate(pOut->mvp.model, glm_rad(45.0f), (vec3){0.0f, 1.0f, 0.0f});
+
+    glm_lookat((vec3){2.0f, 2.0f, 2.0f}, (vec3){0.0f, 0.0f, 0.0f}, (vec3){0.0f, 0.0f, 1.0f}, pOut->mvp.view);
+    glm_perspective(glm_rad(45.0f), (float)screenDimensions.width / (float)screenDimensions.height, 0.1f, 10.0f, pOut->mvp.projection);
+    pOut->mvp.projection[1][1] *= -1.0f;
+
+    PhUBOCreateInfo createInfo = {
+        .size = sizeof(pOut->mvp)
+    };
+    PH_CHECK(PH_LOG_ERROR, ph_ubo_per_frame_create(hDevice, &createInfo, &pOut->perFrameMVPUBO));
+
+    MVPDescriptorCreateParams descriptorParams = {
+        .pipeline = pipeline,
+        .uboPerFrame = &pOut->perFrameMVPUBO,
+    };
+    PH_CHECK(PH_LOG_ERROR,
+        ph_device_per_frame_register(hDevice,
+            sizeof(PhDescriptorSet),
+            _mvp_descriptor_create,
+            _mvp_descriptor_destroy,
+            NULL,
+            &pOut->descriptorSetHandle));
+    PH_CHECK(PH_LOG_ERROR,
+        ph_device_per_frame_create(hDevice, pOut->descriptorSetHandle, &descriptorParams));
+
+    return PH_SUCCESS;
+}
+
+static PhStatus updateMVP(PhDeviceHandle hDevice, MVPData *pData, uint32_t frameIdx)
+{
+    PhExtent2D screenDimensions;
+    PH_CHECK(PH_LOG_ERROR, ph_device_extent_get(hDevice, &screenDimensions));
+
+    glm_mat4_identity(pData->mvp.model);
+    glm_rotate(pData->mvp.model, (1 + (0.001f *  frameIdx)) * glm_rad(45.0f), (vec3){0.0f, 1.0f, 0.0f});
+    
+    glm_lookat((vec3){2.0f, 2.0f, 2.0f}, (vec3){0.0f, 0.0f, 0.0f}, (vec3){0.0f, 0.0f, 1.0f}, pData->mvp.view);
+    glm_perspective(glm_rad(45.0f), (float)screenDimensions.width / (float)screenDimensions.height, 0.1f, 10.0f, pData->mvp.projection);
+    pData->mvp.projection[1][1] *= -1.0f;
+
+    PhUBO *pUBO;
+    PH_CHECK(PH_LOG_ERROR, ph_ubo_per_frame_get(hDevice, &pData->perFrameMVPUBO, &pUBO));
+    memcpy(pUBO->ubo.hostPtr, &pData->mvp, sizeof(pData->mvp));
+
+    return PH_SUCCESS;
+}
+
+PhStatus renderTriangle(PhDeviceHandle device, PhPipeline *pipeline, PhMesh *mesh, PhImage *image, PhSemaphore *pWait, PhSemaphore *pSignal, MVPData *pMVP)
 {
     PhCommandBuffer buffer = { 0 };
     uint32_t imageIndex = 0;
@@ -67,6 +172,10 @@ PhStatus renderTriangle(PhDeviceHandle device, PhPipeline *pipeline, PhMesh *mes
 
     vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->pipeline);
 
+    PhDescriptorSet *pMvpSet;
+    PH_CHECK(PH_LOG_ERROR, ph_device_per_frame_get(device, pMVP->descriptorSetHandle, (void **)&pMvpSet));
+    vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->layout, 0, 1, pMvpSet, 0, NULL);
+
     VkViewport viewport = {
         .x        = 0.0f,
         .y        = 0.0f,
@@ -86,7 +195,6 @@ PhStatus renderTriangle(PhDeviceHandle device, PhPipeline *pipeline, PhMesh *mes
     vkCmdDrawIndexed(buffer, mesh->indices.len, 1, 0, 0, 0);
 
     vkCmdEndRendering(buffer);
-    
     PH_VK_CHECK(PH_LOG_ERROR, vkEndCommandBuffer(buffer));
 
 
@@ -123,6 +231,8 @@ int main(void) {
     PhPipeline pipeline                         = { 0 };
     PhImage presentImage                        = { 0 };
     PhMesh  mesh                                = { 0 };
+    MVPData mvp                                 = { 0 };
+    size_t frameIdx                             = 0;
 
     PhInstanceSettings instanceSettings = {
         .appName = "Farcaster",
@@ -214,6 +324,7 @@ int main(void) {
     pipelineOptions.inputStateInfo.pVertexBindingDescriptions = &vertexBinding;
     pipelineOptions.inputStateInfo.vertexBindingDescriptionCount = 1;
 
+    pipelineOptions.rasterStateInfo.cullMode = VK_CULL_MODE_NONE;
     pipelineOptions.pShaders                = &triangleShader;
     pipelineOptions.shaderCount             = 1UL;
     pipelineOptions.pColorAttachmentFormats = &colorFormat;
@@ -222,14 +333,19 @@ int main(void) {
     PH_CHECK(PH_LOG_ERROR, ph_create_graphics_pipeline(chosenDevice, pipelineOptions, &pipeline));
     PH_CHECK(PH_LOG_ERROR, ph_device_create_staging_buffer(chosenDevice, 1024*1024*64));
     PH_CHECK(PH_LOG_ERROR, ph_mesh_create(chosenDevice, vertexSpan, indexSpan, &mesh));
+    
+    PH_CHECK(PH_LOG_ERROR, initMVP(chosenDevice, &pipeline, &mvp));
 
     while(!ph_window_should_close(hWindow))
     {
         PhSemaphore renderSemaphore;
+        PH_CHECK(PH_LOG_ERROR, ph_device_frame_index_get(chosenDevice, &frameIdx));
         PH_CHECK(PH_LOG_ERROR, ph_device_present_image_get_next(chosenDevice, &presentImage));
-        PH_CHECK(PH_LOG_ERROR, renderTriangle(chosenDevice, &pipeline, &mesh, &presentImage, &presentImage.readySemaphore, &renderSemaphore));
+        PH_CHECK(PH_LOG_ERROR, updateMVP(chosenDevice, &mvp, frameIdx));
+        PH_CHECK(PH_LOG_ERROR, renderTriangle(chosenDevice, &pipeline, &mesh, &presentImage, &presentImage.readySemaphore, &renderSemaphore, &mvp));
         PH_CHECK(PH_LOG_ERROR, ph_device_present(chosenDevice, &renderSemaphore, 1UL));
         ph_window_poll_events(hWindow);
+        frameIdx++;
     }
 
     return 0;
