@@ -343,7 +343,12 @@ int main(void) {
     {
         PhSemaphore renderSemaphore;
         PH_CHECK(PH_LOG_ERROR, ph_device_frame_index_get(chosenDevice, &frameIdx));
-        PH_CHECK(PH_LOG_ERROR, ph_device_present_image_get_next(chosenDevice, &presentImage));
+        PhStatus presentStatus = ph_device_present_image_get_next(chosenDevice, &presentImage);
+        while (presentStatus == PH_ERR_SWAPCHAIN_OUT_OF_DATE || presentStatus == PH_ERR_SWAPCHAIN_SUBOPTIMAL)
+        {
+            PH_CHECK(PH_LOG_ERROR, ph_device_swapchain_recreate(chosenDevice));
+            presentStatus = ph_device_present_image_get_next(chosenDevice, &presentImage);
+        }
         PH_CHECK(PH_LOG_ERROR, updateMVP(chosenDevice, &mvp, frameIdx));
         PH_CHECK(PH_LOG_ERROR, renderTriangle(chosenDevice, &pipeline, &mesh, &presentImage, &presentImage.readySemaphore, &renderSemaphore, &mvp));
         PH_CHECK(PH_LOG_ERROR, ph_device_present(chosenDevice, &renderSemaphore, 1UL));
