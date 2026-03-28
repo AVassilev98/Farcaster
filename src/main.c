@@ -82,7 +82,8 @@ PhStatus renderTriangle(PhDeviceHandle device, PhPipeline *pipeline, PhMesh *mes
 
     VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(buffer, 0, 1, &mesh->gpuVertexBuffer.buffer, &offset);
-    vkCmdDraw(buffer, 3, 1, 0, 0);
+    vkCmdBindIndexBuffer(buffer, mesh->gpuIndexBuffer.buffer, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdDrawIndexed(buffer, mesh->indices.len, 1, 0, 0, 0);
 
     vkCmdEndRendering(buffer);
     
@@ -173,20 +174,14 @@ int main(void) {
     PH_CHECK(PH_LOG_ERROR, ph_create_shader_module(deviceInfos.ptr[0].handle, SHADER_DIR "/triangle.spv", &triangleShader));
 
     static PhVertex vertices[] = {
-        {
-            {0, -0.5},
-            {1.0, 0.0, 0.0},
-        },
-        {
-            {0.5, 0.5},
-            {0.0, 1.0, 0.0},
-        },
-        {
-            {-0.5, 0.5},
-            {0.0, 0.0, 1.0},
-        },
+    {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+    {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+    {{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+    {{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
     };
-
+    static uint16_t indices[] = {
+        0, 1, 2, 2, 3, 0
+    };
 
     VkFormat colorFormat = VK_FORMAT_B8G8R8A8_SRGB;
     PhColorBlendAttachmentOptions blendAttachment = PH_COLOR_BLEND_ATTACHMENT_OPTIONS_DEFAULT;
@@ -205,6 +200,8 @@ int main(void) {
             offsetof(PhVertex, color)
         },
     };
+    PhVertexSpan vertexSpan = PhVertexSpan_from(vertices, PH_NUM_ELEMS(vertices));
+    PhIndexSpan indexSpan = PhIndexSpan_from(indices, PH_NUM_ELEMS(indices));
 
     VkVertexInputBindingDescription vertexBinding = {
         .binding = 0,
@@ -224,7 +221,7 @@ int main(void) {
     pipelineOptions.pColorBlendAttachments  = &blendAttachment;
     PH_CHECK(PH_LOG_ERROR, ph_create_graphics_pipeline(chosenDevice, pipelineOptions, &pipeline));
     PH_CHECK(PH_LOG_ERROR, ph_device_create_staging_buffer(chosenDevice, 1024*1024*64));
-    PH_CHECK(PH_LOG_ERROR, ph_mesh_create(chosenDevice, vertices, PH_NUM_ELEMS(vertices), &mesh));
+    PH_CHECK(PH_LOG_ERROR, ph_mesh_create(chosenDevice, vertexSpan, indexSpan, &mesh));
 
     while(!ph_window_should_close(hWindow))
     {
