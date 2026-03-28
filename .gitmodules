@@ -1,0 +1,3 @@
+[submodule "external/Photon"]
+	path = external/Photon
+	url = git@github.com:AVassilev98/Photon.git
