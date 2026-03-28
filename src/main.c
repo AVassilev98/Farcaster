@@ -233,6 +233,8 @@ int main(void) {
     PhMesh  mesh                                = { 0 };
     MVPData mvp                                 = { 0 };
     size_t frameIdx                             = 0;
+    size_t frameCount                           = 0;
+    double lastTime                             = 0;
 
     PhInstanceSettings instanceSettings = {
         .appName = "Farcaster",
@@ -276,7 +278,7 @@ int main(void) {
             .format = VK_FORMAT_B8G8R8A8_SRGB,
             .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
         },
-        .mode = VK_PRESENT_MODE_FIFO_KHR
+        .mode = VK_PRESENT_MODE_IMMEDIATE_KHR
     };
     PH_CHECK(PH_LOG_ERROR, ph_window_get_surface(hWindow, &hSurface));
     chosenDevice = deviceInfos.ptr[0].handle;
@@ -336,6 +338,7 @@ int main(void) {
     
     PH_CHECK(PH_LOG_ERROR, initMVP(chosenDevice, &pipeline, &mvp));
 
+
     while(!ph_window_should_close(hWindow))
     {
         PhSemaphore renderSemaphore;
@@ -345,7 +348,14 @@ int main(void) {
         PH_CHECK(PH_LOG_ERROR, renderTriangle(chosenDevice, &pipeline, &mesh, &presentImage, &presentImage.readySemaphore, &renderSemaphore, &mvp));
         PH_CHECK(PH_LOG_ERROR, ph_device_present(chosenDevice, &renderSemaphore, 1UL));
         ph_window_poll_events(hWindow);
-        frameIdx++;
+
+        frameCount++;
+        double now = glfwGetTime();
+        if (now - lastTime >= 1.0) {
+            printf("FPS: %lu\n", frameCount);
+            frameCount = 0;
+            lastTime = now;
+        }
     }
 
     return 0;
