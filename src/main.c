@@ -71,7 +71,7 @@ static PhStatus initMVP(PhDeviceHandle hDevice, PhPipeline *pipeline, MVPData *p
     glm_mat4_identity(pOut->mvp.model);
     glm_rotate(pOut->mvp.model, glm_rad(45.0f), (vec3){0.0f, 1.0f, 0.0f});
 
-    glm_lookat((vec3){2.0f, 2.0f, 2.0f}, (vec3){0.0f, 0.0f, 0.0f}, (vec3){0.0f, 0.0f, 1.0f}, pOut->mvp.view);
+    glm_mat4_identity(pOut->mvp.view);
     glm_perspective(glm_rad(45.0f), (float)screenDimensions.width / (float)screenDimensions.height, 0.1f, 10.0f, pOut->mvp.projection);
     pOut->mvp.projection[1][1] *= -1.0f;
 
@@ -105,7 +105,6 @@ static PhStatus updateMVP(PhDeviceHandle hDevice, MVPData *pData, uint32_t frame
     glm_mat4_identity(pData->mvp.model);
     glm_rotate(pData->mvp.model, (1 + (0.001f *  frameIdx)) * glm_rad(45.0f), (vec3){0.0f, 1.0f, 0.0f});
     
-    glm_lookat((vec3){2.0f, 2.0f, 2.0f}, (vec3){0.0f, 0.0f, 0.0f}, (vec3){0.0f, 0.0f, 1.0f}, pData->mvp.view);
     glm_perspective(glm_rad(45.0f), (float)screenDimensions.width / (float)screenDimensions.height, 0.1f, 10.0f, pData->mvp.projection);
     pData->mvp.projection[1][1] *= -1.0f;
 
@@ -224,7 +223,6 @@ int main(void) {
     PhCapability deviceCaps                     = { 0 };
     PhDeviceInfoSpan deviceInfos                = { 0 };
     PhPresentOptions presentOptions             = { 0 };
-    PhSurfaceHandle hSurface                    = { 0 };
     PhDeviceHandle chosenDevice                 = { 0 };
     PhShaderModule triangleShader               = { 0 };
     PhGraphicsPipelineOptions pipelineOptions   = PH_PIPELINE_OPTIONS_DEFAULT;
@@ -280,9 +278,8 @@ int main(void) {
         },
         .mode = VK_PRESENT_MODE_IMMEDIATE_KHR
     };
-    PH_CHECK(PH_LOG_ERROR, ph_window_get_surface(hWindow, &hSurface));
     chosenDevice = deviceInfos.ptr[0].handle;
-    PH_CHECK(PH_LOG_ERROR, ph_device_configure_for_present(chosenDevice, hSurface, presentOptions));
+    PH_CHECK(PH_LOG_ERROR, ph_device_window_attach(chosenDevice, hWindow, presentOptions));
     PH_CHECK(PH_LOG_ERROR, ph_create_shader_module(deviceInfos.ptr[0].handle, SHADER_DIR "/triangle.spv", &triangleShader));
 
     static PhVertex vertices[] = {
@@ -349,6 +346,7 @@ int main(void) {
             PH_CHECK(PH_LOG_ERROR, ph_device_swapchain_recreate(chosenDevice));
             presentStatus = ph_device_present_image_get_next(chosenDevice, &presentImage);
         }
+        PH_CHECK(PH_LOG_ERROR, ph_device_camera_view_get(chosenDevice, mvp.mvp.view));
         PH_CHECK(PH_LOG_ERROR, updateMVP(chosenDevice, &mvp, frameIdx));
         PH_CHECK(PH_LOG_ERROR, renderTriangle(chosenDevice, &pipeline, &mesh, &presentImage, &presentImage.readySemaphore, &renderSemaphore, &mvp));
         PH_CHECK(PH_LOG_ERROR, ph_device_present(chosenDevice, &renderSemaphore, 1UL));
