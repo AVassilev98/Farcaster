@@ -69,9 +69,8 @@ typedef struct MVPDescriptorCreateParams {
 typedef struct MVPData {
     MVP mvp;
     PhUBOPerFrame perFrameMVPUBO;
-    PhPerFrameResourceHandle descriptorSetHandle;
-    PhImage textureImage;
-    PhSampler textureSampler;
+    PhImage fallbackImage;
+    PhSampler fallbackSampler;
 } MVPData;
 
 static PhStatus _mvp_descriptor_create(PhDeviceHandle hDevice, void *userdata, uint32_t frameIndex, void *out)
@@ -123,7 +122,7 @@ static void _mvp_descriptor_destroy(PhDeviceHandle hDevice, void *resource)
     ph_device_descriptor_sets_free(hDevice, pSet, 1);
 }
 
-static PhStatus initMVP(PhDeviceHandle hDevice, PhPipeline *pipeline, MVPData *pOut)
+static PhStatus initMVP(PhDeviceHandle hDevice, PhPipeline *pipeline, PhMesh *mesh, MVPData *pOut)
 {
     PhExtent2D screenDimensions;
     PH_CHECK(PH_LOG_ERROR, ph_device_extent_get(hDevice, &screenDimensions));
@@ -134,7 +133,7 @@ static PhStatus initMVP(PhDeviceHandle hDevice, PhPipeline *pipeline, MVPData *p
     glm_perspective(glm_rad(0.0f), (float)screenDimensions.width / (float)screenDimensions.height, 0.1f, 1000.0f, pOut->mvp.projection);
     pOut->mvp.projection[1][1] *= -1.0f;
 
-    /* Generate a 256x256 checkerboard texture (RGBA8) */
+    /* Generate a 256x256 checkerboard fallback texture (RGBA8) */
     enum { TEX_W = 256, TEX_H = 256, TILE = 16 };
     uint8_t *pixels = malloc(TEX_W * TEX_H * 4);
     for (int y = 0; y < TEX_H; y++) {
@@ -152,8 +151,8 @@ static PhStatus initMVP(PhDeviceHandle hDevice, PhPipeline *pipeline, MVPData *p
         .usage  = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         .tiling = VK_IMAGE_TILING_OPTIMAL,
     };
-    PH_CHECK(PH_LOG_ERROR, ph_device_image_create(hDevice, &imgInfo, &pOut->textureImage));
-    PH_CHECK(PH_LOG_ERROR, ph_device_image_upload(hDevice, pixels, TEX_W * TEX_H * 4, &pOut->textureImage));
+    PH_CHECK(PH_LOG_ERROR, ph_device_image_create(hDevice, &imgInfo, &pOut->fallbackImage));
+    PH_CHECK(PH_LOG_ERROR, ph_device_image_upload(hDevice, pixels, TEX_W * TEX_H * 4, &pOut->fallbackImage));
     free(pixels);
 
     PhSamplerCreateInfo samplerInfo = {
@@ -164,28 +163,47 @@ static PhStatus initMVP(PhDeviceHandle hDevice, PhPipeline *pipeline, MVPData *p
         .addressModeW     = VK_SAMPLER_ADDRESS_MODE_REPEAT,
         .anisotropyEnable = VK_TRUE,
     };
-    PH_CHECK(PH_LOG_ERROR, ph_device_sampler_create(hDevice, &samplerInfo, &pOut->textureSampler));
+    PH_CHECK(PH_LOG_ERROR, ph_device_sampler_create(hDevice, &samplerInfo, &pOut->fallbackSampler));
 
     PhUBOCreateInfo createInfo = {
         .size = sizeof(pOut->mvp)
     };
     PH_CHECK(PH_LOG_ERROR, ph_ubo_per_frame_create(hDevice, &createInfo, &pOut->perFrameMVPUBO));
 
-    MVPDescriptorCreateParams descriptorParams = {
-        .pipeline       = pipeline,
-        .uboPerFrame    = &pOut->perFrameMVPUBO,
-        .textureImage   = &pOut->textureImage,
-        .textureSampler = &pOut->textureSampler,
-    };
-    PH_CHECK(PH_LOG_ERROR,
-        ph_device_per_frame_register(hDevice,
-            sizeof(PhDescriptorSet),
-            _mvp_descriptor_create,
-            _mvp_descriptor_destroy,
-            NULL,
-            &pOut->descriptorSetHandle));
-    PH_CHECK(PH_LOG_ERROR,
-        ph_device_per_frame_create(hDevice, pOut->descriptorSetHandle, &descriptorParams));
+    for (uint32_t i = 0; i < mesh->materials.len; i++)
+    {
+        PhMaterial *mat = &mesh->materials.data[i];
+
+        PhImage   *texImage;
+        PhSampler *texSampler;
+        if (mat->textures.len > 0)
+        {
+            uint32_t diffuseIdx = mat->textureHandles[aiTextureType_DIFFUSE];
+            texImage   = &mat->textures.data[diffuseIdx].image;
+            texSampler = &mat->textures.data[diffuseIdx].imageSampler;
+        }
+        else
+        {
+            texImage   = &pOut->fallbackImage;
+            texSampler = &pOut->fallbackSampler;
+        }
+
+        MVPDescriptorCreateParams descriptorParams = {
+            .pipeline       = pipeline,
+            .uboPerFrame    = &pOut->perFrameMVPUBO,
+            .textureImage   = texImage,
+            .textureSampler = texSampler,
+        };
+        PH_CHECK(PH_LOG_ERROR,
+            ph_device_per_frame_register(hDevice,
+                sizeof(PhDescriptorSet),
+                _mvp_descriptor_create,
+                _mvp_descriptor_destroy,
+                NULL,
+                &mat->descriptorHandle));
+        PH_CHECK(PH_LOG_ERROR,
+            ph_device_per_frame_create(hDevice, mat->descriptorHandle, &descriptorParams));
+    }
 
     return PH_SUCCESS;
 }
@@ -291,10 +309,6 @@ PhStatus renderTriangle(PhDeviceHandle device, PhPipeline *pipeline, PhMesh *mes
 
     vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->pipeline);
 
-    PhDescriptorSet *pMvpSet;
-    PH_CHECK(PH_LOG_ERROR, ph_device_per_frame_get(device, pMVP->descriptorSetHandle, (void **)&pMvpSet));
-    vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->layout, 0, 1, pMvpSet, 0, NULL);
-
     VkViewport viewport = {
         .x        = 0.0f,
         .y        = 0.0f,
@@ -311,7 +325,17 @@ PhStatus renderTriangle(PhDeviceHandle device, PhPipeline *pipeline, PhMesh *mes
     VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(buffer, 0, 1, &mesh->gpuVertexBuffer.buffer, &offset);
     vkCmdBindIndexBuffer(buffer, mesh->gpuIndexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(buffer, mesh->indices.len, 1, 0, 0, 0);
+
+    for (uint32_t s = 0; s < mesh->subMeshes.len; s++)
+    {
+        PhSubMesh  *sub = &mesh->subMeshes.data[s];
+        PhMaterial *mat = &mesh->materials.data[sub->materialHandle];
+
+        PhDescriptorSet *pSet;
+        PH_CHECK(PH_LOG_ERROR, ph_device_per_frame_get(device, mat->descriptorHandle, (void **)&pSet));
+        vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->layout, 0, 1, pSet, 0, NULL);
+        vkCmdDrawIndexed(buffer, sub->numIndices, 1, sub->indicesHandle, 0, 0);
+    }
 
     vkCmdEndRendering(buffer);
     PH_VK_CHECK(PH_LOG_ERROR, vkEndCommandBuffer(buffer));
@@ -446,7 +470,7 @@ int main(void) {
             _depth_image_create, _depth_image_destroy, _depth_image_recreate, &depthImageHandle));
     PH_CHECK(PH_LOG_ERROR, ph_device_per_frame_create(chosenDevice, depthImageHandle, &extent));
 
-    PH_CHECK(PH_LOG_ERROR, initMVP(chosenDevice, &pipeline, &mvp));
+    PH_CHECK(PH_LOG_ERROR, initMVP(chosenDevice, &pipeline, &mesh, &mvp));
 
 
     while(!ph_window_should_close(hWindow))
