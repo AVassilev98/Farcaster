@@ -8,25 +8,31 @@ struct MVP
 [[vk::binding(0, 0)]]
 ConstantBuffer<MVP> mvp;
 
+[[vk::binding(1, 0)]]
+Sampler2D texture;
+
 struct VertexInput
 {
-    float2 position : POSITION;
-    float3 color    : COLOR;
+    float3 position : POSITION;
+    float3 normal   : NORMAL;
+    float2 texCoord : TEXCOORD;
 };
 
 struct VertexOutput
 {
     float4 sv_position : SV_Position;
-    float3 color       : COLOR;
+    float3 normal      : NORMAL;
+    float2 texCoord    : TEXCOORD;
 };
 
 [shader("vertex")]
 VertexOutput vertMain(VertexInput vin)
 {
     VertexOutput output;
-    float4 pos = float4(vin.position, 0.0, 1.0);
+    float4 pos = float4(vin.position, 1.0);
     output.sv_position = mul(mvp.projection, mul(mvp.view, mul(mvp.model, pos)));
-    output.color       = vin.color;
+    output.normal      = vin.normal;
+    output.texCoord    = vin.texCoord;
     return output;
 }
 
@@ -34,6 +40,8 @@ VertexOutput vertMain(VertexInput vin)
 float4 fragMain(VertexOutput inVert)
     : SV_Target
 {
-    float3 color = inVert.color;
-    return float4(color, 1.0);
+    float3 texColor = texture.Sample(inVert.texCoord).rgb;
+    float3 lightDir = normalize(float3(1.0, 1.0, 0.5));
+    float ndotl = max(dot(normalize(inVert.normal), lightDir), 0.15);
+    return float4(texColor * ndotl, 1.0);
 }
