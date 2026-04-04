@@ -5,18 +5,24 @@ struct MVP
     float4x4 projection;
 };
 
-[[vk::binding(0, 0)]]
-ConstantBuffer<MVP> mvp;
-
-[[vk::binding(1, 0)]]
-Sampler2D texture;
-
-struct VertexInput
+struct Vertex
 {
-    float3 position : POSITION;
-    float3 normal   : NORMAL;
-    float2 texCoord : TEXCOORD;
+    float3 position;
+    float3 normal;
+    float2 texCoord;
 };
+
+struct PushData
+{
+    Vertex *pVertexBuffer;
+    MVP *pMvp;
+};
+
+[[vk::push_constant]]
+PushData pushData;
+
+[[vk::binding(0, 0)]]
+Sampler2D texture;
 
 struct VertexOutput
 {
@@ -26,11 +32,14 @@ struct VertexOutput
 };
 
 [shader("vertex")]
-VertexOutput vertMain(VertexInput vin)
+VertexOutput vertMain(uint vertexID : SV_VertexID)
 {
+    Vertex vin = pushData.pVertexBuffer[vertexID];
+    MVP matrices = *pushData.pMvp;
+
     VertexOutput output;
     float4 pos = float4(vin.position, 1.0);
-    output.sv_position = mul(mvp.projection, mul(mvp.view, mul(mvp.model, pos)));
+    output.sv_position = mul(matrices.projection, mul(matrices.view, mul(matrices.model, pos)));
     output.normal      = vin.normal;
     output.texCoord    = vin.texCoord;
     return output;

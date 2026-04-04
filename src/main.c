@@ -16,6 +16,11 @@
 
 #define DEPTH_FORMAT VK_FORMAT_D32_SFLOAT
 
+typedef struct PushData {
+    uint64_t deviceVertexBufferAddress;
+    uint64_t deviceUBOAddress;
+} PushData;
+
 static PhStatus _depth_image_create(PhDeviceHandle hDevice, void *userdata, uint32_t frameIndex, void *out)
 {
     (void)frameIndex;
@@ -98,20 +103,12 @@ static PhStatus _mvp_descriptor_create(PhDeviceHandle hDevice, void *userdata, u
             .set          = *pSet,
             .binding      = 0,
             .arrayElement = 0,
-            .type         = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            .count        = 1,
-            .pBufferInfo  = &bufInfo,
-        },
-        {
-            .set          = *pSet,
-            .binding      = 1,
-            .arrayElement = 0,
             .type         = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             .count        = 1,
             .pImageInfo   = &imageInfo,
         },
     };
-    PH_CHECK(PH_LOG_ERROR, ph_device_descriptor_sets_write(hDevice, writes, 2));
+    PH_CHECK(PH_LOG_ERROR, ph_device_descriptor_sets_write(hDevice, writes, PH_NUM_ELEMS(writes)));
 
     return PH_SUCCESS;
 }
@@ -230,6 +227,14 @@ PhStatus renderTriangle(PhDeviceHandle device, PhPipeline *pipeline, PhMesh *mes
     PhCommandBuffer buffer = { 0 };
     uint32_t imageIndex = 0;
     PhSemaphore finishedSemaphore = { 0 };
+    PhUBO *pUbo = NULL;
+
+    PH_CHECK(PH_LOG_ERROR, ph_ubo_per_frame_get(device, &pMVP->perFrameMVPUBO, &pUbo));
+
+    PushData pushData = {
+        .deviceUBOAddress = pUbo->ubo.deviceAddress,
+        .deviceVertexBufferAddress = mesh->gpuVertexBuffer.deviceAddress
+    };
 
     VkCommandBufferBeginInfo beginInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -325,6 +330,7 @@ PhStatus renderTriangle(PhDeviceHandle device, PhPipeline *pipeline, PhMesh *mes
     VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(buffer, 0, 1, &mesh->gpuVertexBuffer.buffer, &offset);
     vkCmdBindIndexBuffer(buffer, mesh->gpuIndexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdPushConstants(buffer, pipeline->layout, VK_SHADER_STAGE_ALL, 0, sizeof(PushData), &pushData);
 
     for (uint32_t s = 0; s < mesh->subMeshes.len; s++)
     {
@@ -402,6 +408,7 @@ int main(void) {
         .rtCapable = true,
         .discrete = true,
 #endif
+        .bufferDeviceAddress = true,
         .swapchain = true,
         .graphicsQueue = true,
         .samplerAnisotropy = true,
