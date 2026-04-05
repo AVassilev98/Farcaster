@@ -65,7 +65,7 @@ foreach(SHADER ${SHADER_SOURCES})
 
     add_custom_command(
         OUTPUT  ${OUTPUT_FILE}
-        COMMAND ${SLANGC} ${CMAKE_CURRENT_SOURCE_DIR}/${SHADER} -o ${OUTPUT_FILE} -target spirv
+        COMMAND ${SLANGC} ${CMAKE_CURRENT_SOURCE_DIR}/${SHADER} -o ${OUTPUT_FILE} -target spirv -fvk-use-scalar-layout
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${SHADER}
         COMMENT "Compiling ${SHADER}"
     )

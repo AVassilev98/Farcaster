@@ -27,12 +27,12 @@ Sampler2D texture;
 struct VertexOutput
 {
     float4 sv_position : SV_Position;
-    float3 normal      : NORMAL;
-    float2 texCoord    : TEXCOORD;
+    float3 normal : NORMAL;
+    float2 texCoord : TEXCOORD;
 };
 
 [shader("vertex")]
-VertexOutput vertMain(uint vertexID : SV_VertexID)
+VertexOutput vertMain(uint vertexID: SV_VertexID)
 {
     Vertex vin = pushData.pVertexBuffer[vertexID];
     MVP matrices = *pushData.pMvp;
@@ -40,8 +40,8 @@ VertexOutput vertMain(uint vertexID : SV_VertexID)
     VertexOutput output;
     float4 pos = float4(vin.position, 1.0);
     output.sv_position = mul(matrices.projection, mul(matrices.view, mul(matrices.model, pos)));
-    output.normal      = vin.normal;
-    output.texCoord    = vin.texCoord;
+    output.normal = vin.normal;
+    output.texCoord = vin.texCoord;
     return output;
 }
 

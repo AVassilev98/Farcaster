@@ -330,7 +330,7 @@ PhStatus renderTriangle(PhDeviceHandle device, PhPipeline *pipeline, PhMesh *mes
     VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(buffer, 0, 1, &mesh->gpuVertexBuffer.buffer, &offset);
     vkCmdBindIndexBuffer(buffer, mesh->gpuIndexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdPushConstants(buffer, pipeline->layout, VK_SHADER_STAGE_ALL, 0, sizeof(PushData), &pushData);
+    vkCmdPushConstants(buffer, pipeline->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushData), &pushData);
 
     for (uint32_t s = 0; s < mesh->subMeshes.len; s++)
     {
